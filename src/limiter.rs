@@ -1,5 +1,5 @@
+use std::cell::RefCell;
 use std::time::Duration;
-use std::{borrow::Borrow, cell::RefCell};
 
 use queues::{IsQueue, Queue};
 use tokio::time::Instant;
@@ -83,5 +83,12 @@ impl Limiter {
         } else {
             Err(ReserveWeightFailed::InsufficientCurrentCapacity)
         }
+    }
+
+    /// Release any expired weight reservations back to the total pool and return the total remaining.
+    pub fn remaining_weight(&self) -> u64 {
+        let now = Instant::now();
+        self.release_weight(&now);
+        *self.remaining_weight.borrow()
     }
 }
