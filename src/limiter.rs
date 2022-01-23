@@ -13,7 +13,7 @@ pub enum ReserveWeightFailed {
 #[derive(Clone)]
 struct WeightReservation {
     reserved_weight: u64,
-    time_to_release_weight: tokio::time::Instant,
+    time_to_release_weight: Instant,
 }
 
 pub struct Limiter {
