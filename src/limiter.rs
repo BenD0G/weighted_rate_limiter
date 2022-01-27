@@ -91,4 +91,14 @@ impl Limiter {
         self.release_weight(&now);
         *self.remaining_weight.borrow()
     }
+
+    /// Release any expired weight, and return the time at which the next weight will expire.
+    pub fn time_of_next_weight_released(&self) -> Option<Instant> {
+        let now = Instant::now();
+        self.release_weight(&now);
+        match self.reserved_weights.borrow().peek() {
+            Ok(x) => Some(x.time_to_release_weight),
+            Err(_) => None,
+        }
+    }
 }
