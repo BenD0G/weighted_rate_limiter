@@ -4,6 +4,7 @@ use std::time::Duration;
 use queues::{IsQueue, Queue};
 use tokio::time::Instant;
 
+#[derive(Debug)]
 pub enum ReserveWeightFailed {
     RequestedGreaterThanTotalCapacity,
     InsufficientCurrentCapacity,
