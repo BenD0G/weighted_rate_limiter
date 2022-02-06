@@ -1,7 +1,7 @@
 //! Construct a limiter that can fire 5 times every 5 seconds.
 //! Repeatedly try to reserve a random amount of weight.
 
-use weighted_rate_limiter::{Limiter, RateLimiter};
+use weighted_rate_limiter::{RateLimiter};
 
 use std::time::Duration;
 
@@ -20,9 +20,7 @@ async fn make_future(weight: u64, id: u64, start: &Instant) {
 
 #[tokio::main]
 async fn main() {
-    let limiter = Limiter::new(5, Duration::from_secs(2));
-
-    let rate_limiter = RateLimiter::new(limiter);
+    let rate_limiter = RateLimiter::new(5, Duration::from_secs(2));
 
     let start = Instant::now();
 
