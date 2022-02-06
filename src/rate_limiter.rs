@@ -12,7 +12,7 @@
 //! until the next blcok of weight will expire.
 //! That way you can creat a sleep() here that depends on that and might blow this whole async malarkey wide open.
 
-use crate::Limiter;
+use crate::WeightManager;
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -29,14 +29,14 @@ struct QueueData {
 }
 
 pub struct RateLimiter {
-    limiter: Limiter,
+    limiter: WeightManager,
     queued_jobs: RefCell<VecDeque<QueueData>>,
 }
 
 impl RateLimiter {
     pub fn new(max_weight_per_duration: u64, duration: Duration) -> Self {
         Self {
-            limiter: Limiter::new(max_weight_per_duration, duration),
+            limiter: WeightManager::new(max_weight_per_duration, duration),
             queued_jobs: RefCell::new(VecDeque::new()),
         }
     }

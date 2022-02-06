@@ -17,14 +17,14 @@ struct WeightReservation {
     time_to_release_weight: Instant,
 }
 
-pub struct Limiter {
+pub struct WeightManager {
     duration: Duration,
     maximum_capacity: u64,
     remaining_weight: RefCell<u64>,
     reserved_weights: RefCell<Queue<WeightReservation>>,
 }
 
-impl Limiter {
+impl WeightManager {
     pub fn new(max_weight_per_duration: u64, duration: Duration) -> Self {
         Self {
             duration: duration,
@@ -110,7 +110,7 @@ mod tests {
     use super::*;
     use tokio::time::{advance, Instant};
 
-    fn assert_insufficient_capacity(limiter: &Limiter, weight: u64) {
+    fn assert_insufficient_capacity(limiter: &WeightManager, weight: u64) {
         let res = limiter.try_reserve(weight);
         assert!(res.is_err());
         match res.err().unwrap() {
@@ -119,7 +119,7 @@ mod tests {
         };
     }
 
-    fn assert_requesting_too_much(limiter: &Limiter, weight: u64) {
+    fn assert_requesting_too_much(limiter: &WeightManager, weight: u64) {
         let res = limiter.try_reserve(weight);
         assert!(res.is_err());
         match res.err().unwrap() {
@@ -138,7 +138,7 @@ mod tests {
         let one_second = Duration::from_secs(1);
         let one_nano = Duration::from_nanos(1);
 
-        let limiter = Limiter::new(1, Duration::from_secs(1));
+        let limiter = WeightManager::new(1, Duration::from_secs(1));
 
         // Try reserving one weight
         assert!(limiter.try_reserve(1).is_ok());
@@ -174,7 +174,7 @@ mod tests {
 
         let start = Instant::now();
 
-        let limiter = Limiter::new(1200, one_minute);
+        let limiter = WeightManager::new(1200, one_minute);
 
         // Reserve 100 at the start
         assert!(limiter.try_reserve(100).is_ok());

@@ -1,5 +1,5 @@
 mod limiter;
 mod rate_limiter;
 
-pub(crate) use limiter::Limiter;
+pub(crate) use limiter::WeightManager;
 pub use rate_limiter::RateLimiter;
