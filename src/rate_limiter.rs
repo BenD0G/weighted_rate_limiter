@@ -18,6 +18,7 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::future::Future;
 use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
+use std::time::Duration;
 
 use tokio::time::{sleep_until, Sleep};
 
@@ -33,9 +34,9 @@ pub struct RateLimiter {
 }
 
 impl RateLimiter {
-    pub fn new(limiter: Limiter) -> Self {
+    pub fn new(max_weight_per_duration: u64, duration: Duration) -> Self {
         Self {
-            limiter,
+            limiter: Limiter::new(max_weight_per_duration, duration),
             queued_jobs: RefCell::new(VecDeque::new()),
         }
     }
@@ -102,7 +103,7 @@ mod tests {
     /// Test that one future can get limited.
     #[tokio::test(start_paused = true)]
     async fn test_basic() {
-        let r = RateLimiter::new(Limiter::new(1, Duration::from_secs(1)));
+        let r = RateLimiter::new(1, Duration::from_secs(1));
 
         let f1 = make_future(1);
 
@@ -116,7 +117,7 @@ mod tests {
     /// Test that multiple futures can get limited.
     #[tokio::test(start_paused = true)]
     async fn test_basic_multiple() {
-        let r = RateLimiter::new(Limiter::new(1, Duration::from_secs(1)));
+        let r = RateLimiter::new(1, Duration::from_secs(1));
 
         let start = Instant::now();
 
@@ -143,7 +144,7 @@ mod tests {
     /// Test that we can await several futures at the same time
     #[tokio::test(start_paused = true)]
     async fn test_multiple_concurrent() {
-        let r = RateLimiter::new(Limiter::new(1, Duration::from_secs(1)));
+        let r = RateLimiter::new(1, Duration::from_secs(1));
 
         let start = Instant::now();
 
