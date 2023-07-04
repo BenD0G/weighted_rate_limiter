@@ -56,6 +56,8 @@ impl WeightManager {
             if &weight_reservation.time_to_release_weight <= now {
                 *self.remaining_weight.borrow_mut() += weight_reservation.reserved_weight;
                 queue.remove().unwrap();
+            } else {
+                break;
             }
         }
     }
