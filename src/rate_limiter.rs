@@ -46,10 +46,7 @@ impl RateLimiter {
     }
 
     fn wait_until_weight_is_released(&self) -> Option<Sleep> {
-        match self.limiter.time_of_next_weight_released() {
-            Some(instant) => Some(sleep_until(instant)),
-            None => None,
-        }
+        self.limiter.time_of_next_weight_released().map(sleep_until)
     }
 
     pub async fn rate_limit_future<T, F>(&self, future: F, weight: u64) -> T
