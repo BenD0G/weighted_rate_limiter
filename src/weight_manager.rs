@@ -27,7 +27,7 @@ pub struct WeightManager {
 impl WeightManager {
     pub fn new(max_weight_per_duration: u64, duration: Duration) -> Self {
         Self {
-            duration: duration,
+            duration,
             maximum_capacity: max_weight_per_duration,
             remaining_weight: RefCell::new(max_weight_per_duration),
             reserved_weights: RefCell::new(Queue::new()),
