@@ -32,7 +32,7 @@ async fn main() {
         let weight: u64 = rng.gen_range(1..4);
         let fut = make_future(weight, i, &start);
         let rate_limited_fut = rate_limiter.rate_limit_future(fut, weight);
-        futures.push(Box::pin(rate_limited_fut));
+        futures.push(rate_limited_fut);
     }
 
     join_all(futures).await;
