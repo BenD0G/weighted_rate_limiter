@@ -52,17 +52,10 @@ impl WeightManager {
     /// The queued items are assumed to have non-decreasing times, so we can break early.
     fn release_weight(&self, now: &Instant) {
         let mut queue = self.reserved_weights.borrow_mut();
-        loop {
-            match queue.peek() {
-                Ok(weight_reservation) => {
-                    if &weight_reservation.time_to_release_weight <= now {
-                        *self.remaining_weight.borrow_mut() += weight_reservation.reserved_weight;
-                        queue.remove().unwrap();
-                    } else {
-                        break; // The next item to be released is still in the future
-                    }
-                }
-                _ => break, // Queue is empty; nothing to do
+        while let Ok(weight_reservation) = queue.peek() {
+            if &weight_reservation.time_to_release_weight <= now {
+                *self.remaining_weight.borrow_mut() += weight_reservation.reserved_weight;
+                queue.remove().unwrap();
             }
         }
     }
