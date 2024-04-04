@@ -1,5 +1,5 @@
-//! Construct a limiter that can fire 5 times every 5 seconds.
-//! Repeatedly try to reserve a random amount of weight.
+//! Construct a limiter that can fire jobs with total weight 5 every 2 seconds.
+//! Jobs are given a random amount of weight.
 
 use weighted_rate_limiter::RateLimiter;
 
