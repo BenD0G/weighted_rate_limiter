@@ -5,15 +5,7 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 description = "A weighted rate limiter"
 repository = "https://github.com/BenD0G/weighted_rate_limiter"
-keywords = [
-    "weighted",
-    "rate",
-    "limiter",
-    "limit",
-    "throttle",
-    "throttler",
-    "rate-limiter",
-]
+keywords = ["weighted", "rate", "limiter", "limit", "throttle"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
