@@ -1,6 +1,5 @@
 # Weighted Rate Limiter
+Some API's have usage limits where different endpoints or actions have different costs - this is often implemented as the caller having a certain amount of weight that they are allowed to use per a given time period. This crate allows you to implement a rate limiter that enforces these limits - more specifically by queueing up futures that will be executed when the weight becomes available.
 
-Crate for rate-limiting, possibly with different weights for different calls (as is the case for weighted API calls).
-
-# What we want
-1. To have a queue-like structure where we can reserve some weight, with that reserved weight being returned to the available pool after a specified duration.
+# To Note
+This crate is very new, and has not been thoroughly tested.
