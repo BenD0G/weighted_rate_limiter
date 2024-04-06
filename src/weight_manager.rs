@@ -57,7 +57,7 @@ impl WeightManager {
                 *self.remaining_weight.borrow_mut() += weight_reservation.reserved_weight;
                 queue.remove().unwrap();
             } else {
-                break;
+                break; // The next item to be released is still in the future
             }
         }
     }

@@ -1,5 +1,5 @@
-//! Construct a limiter that can fire 5 times every 5 seconds.
-//! Repeatedly try to reserve a random amount of weight.
+//! Construct a limiter that can fire jobs with total weight 5 every 2 seconds.
+//! Jobs are given a random amount of weight.
 
 use weighted_rate_limiter::RateLimiter;
 
@@ -32,7 +32,7 @@ async fn main() {
         let weight: u64 = rng.gen_range(1..4);
         let fut = make_future(weight, i, &start);
         let rate_limited_fut = rate_limiter.rate_limit_future(fut, weight);
-        futures.push(Box::pin(rate_limited_fut));
+        futures.push(rate_limited_fut);
     }
 
     join_all(futures).await;

@@ -1,17 +1,3 @@
-//! Provides a struct for rate-limiting Future executions.
-//!
-//! The basic flow is:
-//! 1. Pass your Future into the machine
-//! 2. This is added to a queue and waits to be processed
-//! 3. A future is returned that, when polled:
-//!     a) If the underlying future is pending, returns pending ("I'm working on it, ok??")
-//!     b) If waiting,
-//!
-//!
-//! Notes for next time: expose another bit of API on the Limiter that returns the amount of time
-//! until the next blcok of weight will expire.
-//! That way you can creat a sleep() here that depends on that and might blow this whole async malarkey wide open.
-
 use crate::WeightManager;
 
 use std::cell::RefCell;
@@ -28,6 +14,7 @@ struct QueueData {
     job_id: u64,
 }
 
+/// A rate limiter that enforces a weight limit over a given time period.
 pub struct RateLimiter {
     limiter: WeightManager,
     queued_jobs: RefCell<VecDeque<QueueData>>,
@@ -49,6 +36,7 @@ impl RateLimiter {
         self.limiter.time_of_next_weight_released().map(sleep_until)
     }
 
+    /// Returns a future that will be executed when the weight is available.
     pub async fn rate_limit_future<T, F>(&self, future: F, weight: u64) -> T
     where
         F: Future<Output = T>,
