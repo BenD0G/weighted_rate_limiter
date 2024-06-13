@@ -2,7 +2,8 @@ use crate::WeightManager;
 
 use std::collections::VecDeque;
 use std::future::Future;
-use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -30,7 +31,7 @@ impl RateLimiter {
     }
 
     fn make_id() -> u64 {
-        COUNTER.fetch_add(1, Relaxed)
+        COUNTER.fetch_add(1, Ordering::SeqCst)
     }
 
     fn wait_until_weight_is_released(&self) -> Option<Sleep> {
