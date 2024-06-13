@@ -3,11 +3,11 @@
 
 use weighted_rate_limiter::RateLimiter;
 
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use futures::future::join_all;
-use rand::{thread_rng, Rng};
-use tokio::time::Instant;
+use rand::{rngs::StdRng, Rng, SeedableRng};
+use tokio::{task, time::Instant};
 
 async fn make_future(weight: u64, id: u64, start: &Instant) {
     println!(
@@ -20,19 +20,29 @@ async fn make_future(weight: u64, id: u64, start: &Instant) {
 
 #[tokio::main]
 async fn main() {
-    let rate_limiter = RateLimiter::new(5, Duration::from_secs(2));
+    let rate_limiter = Arc::new(RateLimiter::new(5, Duration::from_secs(2)));
 
     let start = Instant::now();
 
-    let mut rng = thread_rng();
-
     let mut futures = vec![];
 
-    for i in 0..1000 {
-        let weight: u64 = rng.gen_range(1..4);
-        let fut = make_future(weight, i, &start);
-        let rate_limited_fut = rate_limiter.rate_limit_future(fut, weight);
-        futures.push(rate_limited_fut);
+    for _ in 0..10 {
+        let rate_limiter = Arc::clone(&rate_limiter);
+        let start = start.clone();
+
+        let fut = task::spawn(async move {
+            let mut rng = StdRng::seed_from_u64(69);
+            let mut thread_futures = vec![];
+            for j in 0..100 {
+                let weight: u64 = rng.gen_range(1..4);
+                let fut = make_future(weight, j, &start);
+                let rate_limited_fut = rate_limiter.rate_limit_future(fut, weight);
+                thread_futures.push(rate_limited_fut);
+            }
+            join_all(thread_futures).await;
+        });
+
+        futures.push(fut);
     }
 
     join_all(futures).await;

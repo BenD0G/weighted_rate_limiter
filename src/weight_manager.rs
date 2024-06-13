@@ -1,6 +1,7 @@
+use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use std::{cell::RefCell, sync::atomic::AtomicU64};
 
 use queues::{IsQueue, Queue};
 use tokio::time::Instant;
@@ -22,7 +23,7 @@ pub struct WeightManager {
     duration: Duration,
     maximum_capacity: u64,
     remaining_weight: AtomicU64,
-    reserved_weights: RefCell<Queue<WeightReservation>>,
+    reserved_weights: Arc<Mutex<Queue<WeightReservation>>>,
 }
 
 impl WeightManager {
@@ -31,15 +32,16 @@ impl WeightManager {
             duration,
             maximum_capacity: max_weight_per_duration,
             remaining_weight: AtomicU64::new(max_weight_per_duration),
-            reserved_weights: RefCell::new(Queue::new()),
+            reserved_weights: Arc::new(Mutex::new(Queue::new())),
         }
     }
 
     /// Remove the weight from our remaining capacity, and add this reservation to our queue.
     fn reserve(&self, now: &Instant, weight: u64) {
         self.remaining_weight.fetch_sub(weight, Ordering::Relaxed);
-        let mut queue = self.reserved_weights.borrow_mut();
-        queue
+        self.reserved_weights
+            .lock()
+            .unwrap()
             .add(WeightReservation {
                 reserved_weight: weight,
                 time_to_release_weight: now
@@ -52,7 +54,7 @@ impl WeightManager {
     /// Iterate through the queue and release any expired weight reservations back to the pool.
     /// The queued items are assumed to have non-decreasing times, so we can break early.
     fn release_weight(&self, now: &Instant) {
-        let mut queue = self.reserved_weights.borrow_mut();
+        let mut queue = self.reserved_weights.lock().unwrap();
         while let Ok(weight_reservation) = queue.peek() {
             if &weight_reservation.time_to_release_weight <= now {
                 self.remaining_weight
@@ -95,7 +97,7 @@ impl WeightManager {
     pub fn time_of_next_weight_released(&self) -> Option<Instant> {
         let now = Instant::now();
         self.release_weight(&now);
-        match self.reserved_weights.borrow().peek() {
+        match self.reserved_weights.lock().unwrap().peek() {
             Ok(x) => Some(x.time_to_release_weight),
             Err(_) => None,
         }
