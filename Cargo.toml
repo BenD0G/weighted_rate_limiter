@@ -12,7 +12,7 @@ keywords = ["weighted", "rate", "limiter", "limit", "throttle"]
 [dependencies]
 futures = "0.3"
 queues = "1.1"
-tokio = { version = "1.15", features = ["time"] }
+tokio = { version = "1.15", features = ["sync", "time"] }
 
 [dev-dependencies]
 rand = "0.8"
