@@ -1,5 +1,6 @@
-use std::cell::RefCell;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
+use std::{cell::RefCell, sync::atomic::AtomicU64};
 
 use queues::{IsQueue, Queue};
 use tokio::time::Instant;
@@ -20,7 +21,7 @@ struct WeightReservation {
 pub struct WeightManager {
     duration: Duration,
     maximum_capacity: u64,
-    remaining_weight: RefCell<u64>,
+    remaining_weight: AtomicU64,
     reserved_weights: RefCell<Queue<WeightReservation>>,
 }
 
@@ -29,14 +30,14 @@ impl WeightManager {
         Self {
             duration,
             maximum_capacity: max_weight_per_duration,
-            remaining_weight: RefCell::new(max_weight_per_duration),
+            remaining_weight: AtomicU64::new(max_weight_per_duration),
             reserved_weights: RefCell::new(Queue::new()),
         }
     }
 
     /// Remove the weight from our remaining capacity, and add this reservation to our queue.
     fn reserve(&self, now: &Instant, weight: u64) {
-        *self.remaining_weight.borrow_mut() -= weight;
+        self.remaining_weight.fetch_sub(weight, Ordering::Relaxed);
         let mut queue = self.reserved_weights.borrow_mut();
         queue
             .add(WeightReservation {
@@ -54,7 +55,8 @@ impl WeightManager {
         let mut queue = self.reserved_weights.borrow_mut();
         while let Ok(weight_reservation) = queue.peek() {
             if &weight_reservation.time_to_release_weight <= now {
-                *self.remaining_weight.borrow_mut() += weight_reservation.reserved_weight;
+                self.remaining_weight
+                    .fetch_sub(weight_reservation.reserved_weight, Ordering::Relaxed);
                 queue.remove().unwrap();
             } else {
                 break; // The next item to be released is still in the future
@@ -73,7 +75,7 @@ impl WeightManager {
 
         self.release_weight(&now);
 
-        if weight <= *self.remaining_weight.borrow() {
+        if weight <= self.remaining_weight.load(Ordering::Relaxed) {
             self.reserve(&now, weight);
             Ok(())
         } else {
@@ -86,7 +88,7 @@ impl WeightManager {
     fn remaining_weight(&self) -> u64 {
         let now = Instant::now();
         self.release_weight(&now);
-        *self.remaining_weight.borrow()
+        self.remaining_weight.load(Ordering::Relaxed)
     }
 
     /// Release any expired weight, and return the time at which the next weight will expire.
