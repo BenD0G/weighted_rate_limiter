@@ -9,12 +9,13 @@ use futures::future::join_all;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use tokio::{task, time::Instant};
 
-async fn make_future(weight: u64, id: u64, start: &Instant) {
+async fn make_future(weight: u64, thread: u64, id: u64, start: &Instant) {
     println!(
-        "Running job {} with weight {} at {:?}",
+        "Running job {}-{} with weight {} at {:?}s",
+        thread,
         id,
         weight,
-        Instant::now() - *start
+        (Instant::now() - *start).as_secs()
     );
 }
 
@@ -26,16 +27,16 @@ async fn main() {
 
     let mut futures = vec![];
 
-    for _ in 0..10 {
+    for thread_id in 0..10 {
         let rate_limiter = Arc::clone(&rate_limiter);
         let start = start.clone();
 
         let fut = task::spawn(async move {
             let mut rng = StdRng::seed_from_u64(69);
             let mut thread_futures = vec![];
-            for j in 0..100 {
+            for job_id in 0..100 {
                 let weight: u64 = rng.gen_range(1..4);
-                let fut = make_future(weight, j, &start);
+                let fut = make_future(weight, thread_id, job_id, &start);
                 let rate_limited_fut = rate_limiter.rate_limit_future(fut, weight);
                 thread_futures.push(rate_limited_fut);
             }

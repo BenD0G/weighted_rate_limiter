@@ -1,10 +1,14 @@
 use weighted_rate_limiter::RateLimiter;
 
-use futures::join;
-use std::time::Duration;
-use tokio::time::Instant;
+use futures::{future::join_all, join};
+use std::{sync::Arc, time::Duration};
+use tokio::{
+    sync::{Mutex, Notify},
+    task,
+    time::Instant,
+};
 
-async fn make_future(x: u64) -> u64 {
+async fn make_future<T>(x: T) -> T {
     x
 }
 
@@ -71,4 +75,119 @@ async fn test_multiple_concurrent() {
     assert_eq!(results.2, 3);
 
     assert_eq!(Instant::now() - start, Duration::from_secs(2)); // We must have waited 2 seconds to fire 3 things
+}
+
+#[derive(Clone)]
+struct JobId {
+    thread_id: u64,
+    job_id: u64,
+}
+
+/// A more advanced test, testing a more practical scenario: have 5 threads, each submitting some jobs with "random" weights.
+/// The jobs were randomly generated, but are enforced via notify.
+#[tokio::test(start_paused = true)]
+async fn test_multi_threaded() {
+    let rate_limiter = Arc::new(RateLimiter::new(5, Duration::from_secs(2)));
+    let mut futures = vec![];
+
+    let job_ids = vec![
+        JobId {
+            thread_id: 0,
+            job_id: 0,
+        },
+        JobId {
+            thread_id: 0,
+            job_id: 1,
+        },
+        JobId {
+            thread_id: 1,
+            job_id: 0,
+        },
+        JobId {
+            thread_id: 2,
+            job_id: 0,
+        },
+        JobId {
+            thread_id: 3,
+            job_id: 0,
+        },
+        JobId {
+            thread_id: 4,
+            job_id: 0,
+        },
+        JobId {
+            thread_id: 0,
+            job_id: 2,
+        },
+        JobId {
+            thread_id: 3,
+            job_id: 1,
+        },
+        JobId {
+            thread_id: 3,
+            job_id: 2,
+        },
+        JobId {
+            thread_id: 3,
+            job_id: 3,
+        },
+        JobId {
+            thread_id: 4,
+            job_id: 1,
+        },
+        JobId {
+            thread_id: 3,
+            job_id: 4,
+        },
+        JobId {
+            thread_id: 4,
+            job_id: 2,
+        },
+    ];
+
+    let job_ids_and_notifies = Arc::new(
+        job_ids
+            .into_iter()
+            .map(|j| (j, Notify::new()))
+            .collect::<Vec<_>>(),
+    );
+
+    let mut results = Arc::new(Mutex::new(vec![]));
+
+    // Queue up all of the tasks immediately, but in the execution order defined by job_ids
+    for thread_id in 0..5 {
+        let rate_limiter = Arc::clone(&rate_limiter);
+        let job_ids_and_notifies = job_ids_and_notifies.clone();
+        let results = results.clone();
+
+        let fut = task::spawn(async move {
+            let mut thread_futures = vec![];
+            let filtered_job_ids_and_notifies: Vec<(usize, (JobId, Notify))> = job_ids_and_notifies
+                .iter()
+                .enumerate()
+                .filter(|(_, (job_id, x))| job_id.thread_id == thread_id)
+                .map(|(_, (x, y))| (x.clone(), *y.clone()))
+                .collect();
+
+            for (i, (job_id, notify)) in filtered_job_ids_and_notifies {
+                let fut = async {
+                    results.lock().await.push(job_id);
+                };
+                // Wait for the previous task to have rate limited its future
+                if i > 0 {
+                    let (_, prev_notify) = &job_ids_and_notifies[i - 1];
+                    prev_notify.notified().await;
+                }
+                let rate_limited_fut = rate_limiter.rate_limit_future(fut, 1);
+                notify.notify_one();
+                thread_futures.push(rate_limited_fut);
+            }
+
+            let foo = join_all(thread_futures).await;
+        });
+
+        futures.push(fut);
+    }
+
+    join_all(futures).await;
 }

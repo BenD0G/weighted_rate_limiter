@@ -57,9 +57,10 @@ impl RateLimiter {
         }
 
         while next_job_id != job_id {
-            self.wait_until_weight_is_released()
-                .expect("wait_until_weight_is_released is None")
-                .await;
+            if let Some(fut) = self.wait_until_weight_is_released() {
+                fut.await;
+            }
+
             {
                 let queue = self.queued_jobs.lock().await;
                 next_job_id = queue
