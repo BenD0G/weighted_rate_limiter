@@ -1,6 +1,7 @@
 use weighted_rate_limiter::RateLimiter;
 
 use futures::{future::join_all, join};
+use pretty_assertions::assert_eq;
 use std::{sync::Arc, time::Duration};
 use tokio::{
     sync::{Mutex, Notify},
@@ -77,7 +78,7 @@ async fn test_multiple_concurrent() {
     assert_eq!(Instant::now() - start, Duration::from_secs(2)); // We must have waited 2 seconds to fire 3 things
 }
 
-#[derive(Clone)]
+#[derive(Clone, Eq, PartialEq, Debug)]
 struct JobId {
     thread_id: u64,
     job_id: u64,
@@ -147,12 +148,12 @@ async fn test_multi_threaded() {
 
     let job_ids_and_notifies = Arc::new(
         job_ids
-            .into_iter()
-            .map(|j| (j, Notify::new()))
+            .iter()
+            .map(|j| (j.clone(), Notify::new()))
             .collect::<Vec<_>>(),
     );
 
-    let mut results = Arc::new(Mutex::new(vec![]));
+    let results = Arc::new(Mutex::new(vec![]));
 
     // Queue up all of the tasks immediately, but in the execution order defined by job_ids
     for thread_id in 0..5 {
@@ -162,12 +163,13 @@ async fn test_multi_threaded() {
 
         let fut = task::spawn(async move {
             let mut thread_futures = vec![];
-            let filtered_job_ids_and_notifies: Vec<(usize, (JobId, Notify))> = job_ids_and_notifies
-                .iter()
-                .enumerate()
-                .filter(|(_, (job_id, x))| job_id.thread_id == thread_id)
-                .map(|(_, (x, y))| (x.clone(), *y.clone()))
-                .collect();
+            let filtered_job_ids_and_notifies: Vec<(usize, (JobId, &Notify))> =
+                job_ids_and_notifies
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, (job_id, _))| job_id.thread_id == thread_id)
+                    .map(|(i, (x, y))| (i, (x.clone(), y)))
+                    .collect();
 
             for (i, (job_id, notify)) in filtered_job_ids_and_notifies {
                 let fut = async {
@@ -183,11 +185,13 @@ async fn test_multi_threaded() {
                 thread_futures.push(rate_limited_fut);
             }
 
-            let foo = join_all(thread_futures).await;
+            join_all(thread_futures).await;
         });
 
         futures.push(fut);
     }
 
     join_all(futures).await;
+
+    assert_eq!(&*results.lock().await, &job_ids);
 }
