@@ -149,7 +149,8 @@ async fn test_multi_threaded() {
     let job_ids_and_notifies = Arc::new(
         job_ids
             .iter()
-            .map(|j| (j.clone(), Notify::new()))
+            .enumerate()
+            .map(|(index, j)| (index, (j.clone(), Notify::new())))
             .collect::<Vec<_>>(),
     );
 
@@ -158,26 +159,25 @@ async fn test_multi_threaded() {
     // Queue up all of the tasks immediately, but in the execution order defined by job_ids
     for thread_id in 0..5 {
         let rate_limiter = Arc::clone(&rate_limiter);
-        let job_ids_and_notifies = job_ids_and_notifies.clone();
+        let ordered_job_ids_and_notifies = job_ids_and_notifies.clone();
         let results = results.clone();
 
         let fut = task::spawn(async move {
             let mut thread_futures = vec![];
-            let filtered_job_ids_and_notifies: Vec<(usize, (JobId, &Notify))> =
-                job_ids_and_notifies
+            let current_thread_job_ids_and_notifies: Vec<(usize, (JobId, &Notify))> =
+                ordered_job_ids_and_notifies
                     .iter()
-                    .enumerate()
                     .filter(|(_, (job_id, _))| job_id.thread_id == thread_id)
-                    .map(|(i, (x, y))| (i, (x.clone(), y)))
+                    .map(|(i, (x, y))| (*i, (x.clone(), y)))
                     .collect();
 
-            for (i, (job_id, notify)) in filtered_job_ids_and_notifies {
+            for (index, (job_id, notify)) in current_thread_job_ids_and_notifies {
                 let fut = async {
                     results.lock().await.push(job_id);
                 };
                 // Wait for the previous task to have rate limited its future
-                if i > 0 {
-                    let (_, prev_notify) = &job_ids_and_notifies[i - 1];
+                if index > 0 {
+                    let (_, (_, prev_notify)) = &ordered_job_ids_and_notifies[index - 1];
                     prev_notify.notified().await;
                 }
                 let rate_limited_fut = rate_limiter.rate_limit_future(fut, 1);
