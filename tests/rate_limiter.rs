@@ -162,7 +162,7 @@ async fn test_multi_threaded() {
         let ordered_job_ids_and_notifies = job_ids_and_notifies.clone();
         let results = results.clone();
 
-        let fut = task::spawn(async move {
+        let fut = async move {
             let mut thread_futures = vec![];
             let current_thread_job_ids_and_notifies: Vec<(usize, (JobId, &Notify))> =
                 ordered_job_ids_and_notifies
@@ -186,7 +186,7 @@ async fn test_multi_threaded() {
             }
 
             join_all(thread_futures).await;
-        });
+        };
 
         futures.push(fut);
     }
