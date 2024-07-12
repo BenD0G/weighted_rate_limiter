@@ -89,7 +89,7 @@ struct JobId {
 #[tokio::test(start_paused = true)]
 async fn test_multi_threaded() {
     let rate_limiter = Arc::new(RateLimiter::new(5, Duration::from_secs(2)));
-    // let mut futures = vec![];
+    let mut futures = vec![];
 
     let job_ids = vec![
         JobId {
@@ -155,8 +155,6 @@ async fn test_multi_threaded() {
     );
 
     let results = Arc::new(Mutex::new(vec![]));
-    // let all_futures = Arc::new(Mutex::new(vec![]));
-    let mut all_futures = vec![];
 
     // Queue up all of the tasks immediately, but in the execution order defined by job_ids
     for thread_id in 0..5 {
@@ -165,7 +163,7 @@ async fn test_multi_threaded() {
         let results = results.clone();
 
         let fut = async move {
-            let results = results.clone();
+            let mut thread_futures = vec![];
             let current_thread_job_ids_and_notifies: Vec<(usize, (JobId, &Notify))> =
                 ordered_job_ids_and_notifies
                     .iter()
@@ -175,8 +173,7 @@ async fn test_multi_threaded() {
 
             for (index, (job_id, notify)) in current_thread_job_ids_and_notifies {
                 let fut = async {
-                    let results = results.clone();
-                    &results.lock().await.push(job_id);
+                    results.lock().await.push(job_id);
                 };
                 // Wait for the previous task to have rate limited its future
                 if index > 0 {
@@ -184,17 +181,17 @@ async fn test_multi_threaded() {
                     prev_notify.notified().await;
                 }
                 let rate_limited_fut = rate_limiter.rate_limit_future(fut, 1);
-                all_futures.push(rate_limited_fut);
                 notify.notify_one();
+                thread_futures.push(rate_limited_fut);
             }
+
+            join_all(thread_futures).await;
         };
 
-        fut.await;
-
-        // futures.push(fut);
+        futures.push(fut);
     }
 
-    join_all(all_futures).await;
+    join_all(futures).await;
 
     assert_eq!(&*results.lock().await, &job_ids);
 }
