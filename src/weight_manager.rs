@@ -86,8 +86,7 @@ impl WeightManager {
     }
 
     /// Release any expired weight reservations back to the total pool and return the total remaining.
-    #[cfg(test)]
-    fn remaining_weight(&self) -> u64 {
+    pub fn remaining_weight(&self) -> u64 {
         let now = Instant::now();
         self.release_weight(&now);
         self.remaining_weight.load(Ordering::SeqCst)
@@ -97,10 +96,12 @@ impl WeightManager {
     pub fn time_of_next_weight_released(&self) -> Option<Instant> {
         let now = Instant::now();
         self.release_weight(&now);
-        match self.reserved_weights.lock().unwrap().peek() {
-            Ok(x) => Some(x.time_to_release_weight),
-            Err(_) => None,
-        }
+        self.reserved_weights
+            .lock()
+            .unwrap()
+            .peek()
+            .ok()
+            .map(|x| x.time_to_release_weight)
     }
 }
 
