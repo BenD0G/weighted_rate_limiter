@@ -1,11 +1,13 @@
 use crate::WeightManager;
 
-use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::future::Future;
-use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use std::time::Duration;
 
+use tokio::sync::Mutex;
 use tokio::time::{sleep_until, Sleep};
 
 static COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -17,19 +19,19 @@ struct QueueData {
 /// A rate limiter that enforces a weight limit over a given time period.
 pub struct RateLimiter {
     limiter: WeightManager,
-    queued_jobs: RefCell<VecDeque<QueueData>>,
+    queued_jobs: Arc<Mutex<VecDeque<QueueData>>>,
 }
 
 impl RateLimiter {
     pub fn new(max_weight_per_duration: u64, duration: Duration) -> Self {
         Self {
             limiter: WeightManager::new(max_weight_per_duration, duration),
-            queued_jobs: RefCell::new(VecDeque::new()),
+            queued_jobs: Arc::new(Mutex::new(VecDeque::new())),
         }
     }
 
     fn make_id() -> u64 {
-        COUNTER.fetch_add(1, Relaxed)
+        COUNTER.fetch_add(1, Ordering::SeqCst)
     }
 
     fn wait_until_weight_is_released(&self) -> Option<Sleep> {
@@ -44,19 +46,31 @@ impl RateLimiter {
         // Add job to queue
         let job_id = Self::make_id();
         let queue_data = QueueData { job_id };
-        self.queued_jobs.borrow_mut().push_back(queue_data);
-
-        while self
-            .queued_jobs
-            .borrow()
-            .front()
-            .expect("queued_jobs was empty - shouldn't happen!")
-            .job_id
-            != job_id
+        let mut next_job_id;
         {
-            self.wait_until_weight_is_released()
-                .expect("wait_until_weight_is_released is None")
-                .await;
+            let mut queue = self.queued_jobs.lock().await;
+            queue.push_back(queue_data);
+            next_job_id = queue
+                .front()
+                .expect("queued_jobs was empty - shouldn't happen!")
+                .job_id;
+        }
+
+        while next_job_id != job_id {
+            // If we would need to wait anyway, do some waiting.
+            if self.limiter.remaining_weight() < weight {
+                if let Some(fut) = self.wait_until_weight_is_released() {
+                    fut.await;
+                }
+            }
+
+            {
+                let queue = self.queued_jobs.lock().await;
+                next_job_id = queue
+                    .front()
+                    .expect("queued_jobs was empty - shouldn't happen!")
+                    .job_id;
+            }
         }
 
         // Our job is now next in line. Try to reserve the weight - if it fails, wait one more turn.
@@ -68,7 +82,10 @@ impl RateLimiter {
                 panic!("Failed final weight reservation")
             }
         }
-        self.queued_jobs.borrow_mut().pop_front();
+        {
+            let mut queue = self.queued_jobs.lock().await;
+            queue.pop_front();
+        }
 
         future.await
     }

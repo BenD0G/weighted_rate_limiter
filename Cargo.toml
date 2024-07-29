@@ -1,6 +1,6 @@
 [package]
 name = "weighted_rate_limiter"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 description = "A weighted rate limiter"
@@ -12,10 +12,11 @@ keywords = ["weighted", "rate", "limiter", "limit", "throttle"]
 [dependencies]
 futures = "0.3"
 queues = "1.1"
-tokio = { version = "1.15", features = ["time"] }
+tokio = { version = "1.15", features = ["sync", "time"] }
 
 [dev-dependencies]
 rand = "0.8"
+pretty_assertions = "1.4"
 tokio = { version = "1.15", features = ["full", "macros", "test-util"] }
 
 [[example]]

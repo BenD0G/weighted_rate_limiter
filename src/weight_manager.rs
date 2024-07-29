@@ -1,4 +1,6 @@
-use std::cell::RefCell;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use queues::{IsQueue, Queue};
@@ -20,8 +22,8 @@ struct WeightReservation {
 pub struct WeightManager {
     duration: Duration,
     maximum_capacity: u64,
-    remaining_weight: RefCell<u64>,
-    reserved_weights: RefCell<Queue<WeightReservation>>,
+    remaining_weight: AtomicU64,
+    reserved_weights: Arc<Mutex<Queue<WeightReservation>>>,
 }
 
 impl WeightManager {
@@ -29,16 +31,17 @@ impl WeightManager {
         Self {
             duration,
             maximum_capacity: max_weight_per_duration,
-            remaining_weight: RefCell::new(max_weight_per_duration),
-            reserved_weights: RefCell::new(Queue::new()),
+            remaining_weight: AtomicU64::new(max_weight_per_duration),
+            reserved_weights: Arc::new(Mutex::new(Queue::new())),
         }
     }
 
     /// Remove the weight from our remaining capacity, and add this reservation to our queue.
     fn reserve(&self, now: &Instant, weight: u64) {
-        *self.remaining_weight.borrow_mut() -= weight;
-        let mut queue = self.reserved_weights.borrow_mut();
-        queue
+        self.remaining_weight.fetch_sub(weight, Ordering::SeqCst);
+        self.reserved_weights
+            .lock()
+            .unwrap()
             .add(WeightReservation {
                 reserved_weight: weight,
                 time_to_release_weight: now
@@ -51,10 +54,11 @@ impl WeightManager {
     /// Iterate through the queue and release any expired weight reservations back to the pool.
     /// The queued items are assumed to have non-decreasing times, so we can break early.
     fn release_weight(&self, now: &Instant) {
-        let mut queue = self.reserved_weights.borrow_mut();
+        let mut queue = self.reserved_weights.lock().unwrap();
         while let Ok(weight_reservation) = queue.peek() {
             if &weight_reservation.time_to_release_weight <= now {
-                *self.remaining_weight.borrow_mut() += weight_reservation.reserved_weight;
+                self.remaining_weight
+                    .fetch_add(weight_reservation.reserved_weight, Ordering::SeqCst);
                 queue.remove().unwrap();
             } else {
                 break; // The next item to be released is still in the future
@@ -73,7 +77,7 @@ impl WeightManager {
 
         self.release_weight(&now);
 
-        if weight <= *self.remaining_weight.borrow() {
+        if weight <= self.remaining_weight.load(Ordering::SeqCst) {
             self.reserve(&now, weight);
             Ok(())
         } else {
@@ -82,30 +86,30 @@ impl WeightManager {
     }
 
     /// Release any expired weight reservations back to the total pool and return the total remaining.
-    #[cfg(test)]
-    fn remaining_weight(&self) -> u64 {
+    pub fn remaining_weight(&self) -> u64 {
         let now = Instant::now();
         self.release_weight(&now);
-        *self.remaining_weight.borrow()
+        self.remaining_weight.load(Ordering::SeqCst)
     }
 
     /// Release any expired weight, and return the time at which the next weight will expire.
     pub fn time_of_next_weight_released(&self) -> Option<Instant> {
         let now = Instant::now();
         self.release_weight(&now);
-        match self.reserved_weights.borrow().peek() {
-            Ok(x) => Some(x.time_to_release_weight),
-            Err(_) => None,
-        }
+        self.reserved_weights
+            .lock()
+            .unwrap()
+            .peek()
+            .ok()
+            .map(|x| x.time_to_release_weight)
     }
 }
 
 #[cfg(test)]
-mod tests {
+mod test_utils {
     use super::*;
-    use tokio::time::{advance, Instant};
 
-    fn assert_insufficient_capacity(limiter: &WeightManager, weight: u64) {
+    pub fn assert_insufficient_capacity(limiter: &WeightManager, weight: u64) {
         let res = limiter.try_reserve(weight);
         assert!(res.is_err());
         match res.err().unwrap() {
@@ -114,7 +118,7 @@ mod tests {
         };
     }
 
-    fn assert_requesting_too_much(limiter: &WeightManager, weight: u64) {
+    pub fn assert_requesting_too_much(limiter: &WeightManager, weight: u64) {
         let res = limiter.try_reserve(weight);
         assert!(res.is_err());
         match res.err().unwrap() {
@@ -123,9 +127,16 @@ mod tests {
         };
     }
 
-    fn elapsed(since: &Instant) -> Duration {
+    pub fn elapsed(since: &Instant) -> Duration {
         Instant::now() - *since
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::test_utils::*;
+    use super::*;
+    use tokio::time::{advance, Instant};
 
     /// Test basic functionality of the Limiter object.
     #[tokio::test(start_paused = true)]
@@ -213,5 +224,106 @@ mod tests {
         advance(10 * one_second).await;
         assert_eq!(limiter.remaining_weight(), 1200);
         assert_eq!(elapsed(&start), Duration::from_secs(120));
+    }
+}
+
+#[cfg(test)]
+mod multi_threaded_tests {
+    use super::test_utils::*;
+    use super::*;
+    use tokio::sync::Barrier;
+
+    /// This test spawns 10 tasks that each reserve 1 unit of weight.
+    /// We use a `Barrier` to ensure all tasks attempt to reserve weight simultaneously.
+    /// After all tasks have reserved weight, we assert that no additional weight can be reserved,
+    /// as the total capacity should be exhausted.
+    #[tokio::test(start_paused = true)]
+    async fn test_concurrent_reservations() {
+        let limiter = Arc::new(WeightManager::new(10, Duration::from_secs(1)));
+        let barrier = Arc::new(Barrier::new(10));
+
+        let mut handles = vec![];
+
+        for _ in 0..10 {
+            let limiter = Arc::clone(&limiter);
+            let barrier = Arc::clone(&barrier);
+            handles.push(tokio::spawn(async move {
+                barrier.wait().await;
+                limiter.try_reserve(1).expect("Failed to reserve weight");
+            }));
+        }
+
+        for handle in handles {
+            handle.await.unwrap();
+        }
+
+        assert_insufficient_capacity(&limiter, 1);
+    }
+
+    /// This test spawns 10 tasks that each reserve 1 unit of weight.
+    /// After reserving, each task sleeps for 1 second, allowing the weight to be released back into the pool.
+    /// We assert that after all tasks have run, the total remaining weight should be back to its maximum capacity (10).
+    #[tokio::test(start_paused = true)]
+    async fn test_concurrent_releases() {
+        let limiter = Arc::new(WeightManager::new(10, Duration::from_secs(1)));
+        let barrier = Arc::new(Barrier::new(10));
+
+        let mut handles = vec![];
+
+        for _ in 0..10 {
+            let limiter = Arc::clone(&limiter);
+            let barrier = Arc::clone(&barrier);
+            handles.push(tokio::spawn(async move {
+                barrier.wait().await;
+                limiter.try_reserve(1).expect("Failed to reserve weight");
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                assert_eq!(limiter.remaining_weight(), 10);
+            }));
+        }
+
+        for handle in handles {
+            handle.await.unwrap();
+        }
+
+        // At this point, all weights should have been released back
+        assert_eq!(limiter.remaining_weight(), 10);
+    }
+
+    /// This test combines both reservation and release in a concurrent scenario.
+    /// The first 10 tasks reserve weight.
+    /// The next 10 tasks wait for 1 second and then release the weight back.
+    /// We assert that the remaining weight is back to its maximum capacity after all tasks have completed.
+    #[tokio::test(start_paused = true)]
+    async fn test_concurrent_reservation_and_release() {
+        let limiter = Arc::new(WeightManager::new(10, Duration::from_secs(1)));
+        let barrier = Arc::new(Barrier::new(20));
+
+        let mut handles = vec![];
+
+        for _ in 0..10 {
+            let limiter = Arc::clone(&limiter);
+            let barrier = Arc::clone(&barrier);
+            handles.push(tokio::spawn(async move {
+                barrier.wait().await;
+                limiter.try_reserve(1).expect("Failed to reserve weight");
+            }));
+        }
+
+        for _ in 0..10 {
+            let limiter = Arc::clone(&limiter);
+            let barrier = Arc::clone(&barrier);
+            handles.push(tokio::spawn(async move {
+                barrier.wait().await;
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                limiter.release_weight(&Instant::now());
+            }));
+        }
+
+        for handle in handles {
+            handle.await.unwrap();
+        }
+
+        // Ensure all weights have been released back
+        assert_eq!(limiter.remaining_weight(), 10);
     }
 }
