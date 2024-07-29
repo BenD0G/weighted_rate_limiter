@@ -191,3 +191,46 @@ async fn test_multi_threaded() {
 
     assert_eq!(*second_to_result_count.lock().await, expected);
 }
+
+/// Have 2 threads, each submitting 1 job. The capacity is 3, so we want to be sure that both jobs run immediately.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_multi_threaded_simple() {
+    let rate_limiter = Arc::new(RateLimiter::new(3, Duration::from_secs(1)));
+    let num_threads = 2;
+
+    let second_to_result_count = Arc::new(Mutex::new(HashMap::new()));
+
+    let start = Instant::now();
+
+    let mut futures = Vec::new();
+
+    // Queue up all of the tasks immediately, but in the execution order defined by job_ids
+    for _ in 0..num_threads {
+        let rate_limiter = Arc::clone(&rate_limiter);
+        let second_to_result_count = Arc::clone(&second_to_result_count);
+
+        let fut = task::spawn(async move {
+            // Just record when this is evaluated
+            let fut = async {
+                let duration: u64 = (Instant::now() - start).as_secs();
+                second_to_result_count
+                    .lock()
+                    .await
+                    .entry(duration)
+                    .and_modify(|x| *x += 1)
+                    .or_insert(1);
+            };
+
+            rate_limiter.rate_limit_future(fut, 1).await;
+        });
+
+        futures.push(fut);
+    }
+
+    // Just make sure they're all finished.
+    join_all(futures).await;
+
+    let expected = HashMap::from([(0, 2)]);
+
+    assert_eq!(*second_to_result_count.lock().await, expected);
+}
